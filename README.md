@@ -1,2 +1,2 @@
 # ctor
-a light-weight torrent client in Python
+a lightweighted torrent client written in Python
