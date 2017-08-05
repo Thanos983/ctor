@@ -1,4 +1,7 @@
 import asyncio
-from torrent import Torrent
+from trackerConnection import PeerConnection
 
-st = Torrent('rick.torrent')
+ss = PeerConnection('rick.torrent')
+st = PeerConnection('debian.torrent')
+sss = PeerConnection('nitche.torrent')
+sq = PeerConnection('arch.torrent')

@@ -1,34 +1,53 @@
 import bencoder
 import random
 import hashlib
+import json
+import requests
 import socket
 from struct import unpack
-import twisted
-import requests
+from urllib.parse import urlparse
 from pprint import pprint
+
 
 class Torrent(object):
     """ a helper class for keeping track of torrent's information"""
 
     def __init__(self, file_name):
+
         file = open(file_name, 'rb')
         self.torrent_data = bencoder.decode(file.read())
-        self.peerID = self.construct_peer_id()
+        print(self.torrent_data)
 
+        self.peerID = self.construct_peer_id()
         self.downloaded = 0
         self.uploaded = 0
         self.compact = 1
+        # TODO: proper handling of port. From 6881-6889 check every port if it is open and pick the first one
         self.port = 6882
         self.event = 'started'
         self.info = self.torrent_data[b'info']
+        self.creation_date = self.torrent_data[b'creation date']
         self.announce = self.torrent_data[b'announce']
-        # self.announce_list = self.torrent_data[b'announce-list']
 
-        self.multi_file = False
+        if b'announce_list' in self.torrent_data.keys():
+            self.announce_list = self.torrent_data[b'announce-list']
+        elif b'httpseeds' in self.torrent_data.keys():
+            self.announce_list = self.torrent_data[b'httpseeds']
+
         if b'files' in self.info.keys():
-            self.multi_file = True
+            self.files = self.info[b'files']
+        else:
+            # In case we have only one file we change it to a similar format as multi file torrent
+            self.files = list()
+            file_data = dict()
+            file_data[b'length'] = self.info[b'length']
+            file_data[b'path'] = list()
+            file_data[b'path'].append(self.info[b'name'])
+            self.files.append(file_data)
 
-        self.get_peers()
+        self.total_length = self.get_total_length()
+
+
 
     @staticmethod
     def construct_peer_id():
@@ -37,18 +56,10 @@ class Torrent(object):
     def get_total_length(self):
         """ counts and returns the total length of the torrent"""
         length = 0
-        if self.multi_file:
-            for file in self.info[b'files']:
-                length += file[b'length']
-        else:
-            length = self.info[b'length']
+        for file in self.files:
+            length += file[b'length']
 
         return length
-
-    # @staticmethod
-    # def grouper(iterable, n, fill_value=None):
-    #     args = [iter(iterable)] * n
-    #     return zip_longest(*args, fillvalue=fill_value)
 
     def get_peers(self):
         params = dict()
@@ -63,14 +74,22 @@ class Torrent(object):
         params['compact'] = self.compact
         params['event'] = self.event
 
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.0; WOW64; rv:24.0) Gecko/20100101 Firefox/24.0'}
         # send get request to the tracker
-        response = requests.get(self.announce, params=params)
-        print(params)
-        print(response.url)
+        MAX_RETRIES = 20
+        session = requests.session()
+        print(self.announce)
+        # adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
+        # session.mount('https://', adapter)
+        # session.mount('http://', adapter)
 
+        response = session.get('http://atrack.pow7.com/announce', params=params, verify=False, timeout=3)
+        print(response)
         response_data = bencoder.decode(response.content)
-        print(response_data)
-        # response_data[b'peers'] = self.bin_to_dec(response_data[b'peers'])
+        try:
+            response_data[b'peers'] = self.bin_to_dec(response_data[b'peers'])
+        except KeyError:
+            print("torrent " + str(self.info[b'name']) + ' could not be downloaded')
 
         # handshake_response = self._handshake(response_data[b'peers'])
 
@@ -99,15 +118,6 @@ class Torrent(object):
         params['peerID'] = self.peerID
         params['info_hash'] = hashlib.sha1(bencoder.encode(self.info)).digest()
 
-        # send get request to the tracker
-        response = requests.get(self.announce, params=params)
-        print(response.url)
-
-        response_data = bencoder.decode(response.content)
-        response_data[b'peers'] = self.bin_to_dec(response_data[b'peers'])
-        print(response_data)
-
-        return response_data
 
 
 class PeerConnection(object):
