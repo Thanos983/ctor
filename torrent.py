@@ -78,7 +78,6 @@ class Torrent(object):
         self.total_length = self.get_total_length()
         # self.get_udp_peers()
 
-
     # def get_udp_peers(self):
     #
     #     key = int(random.randrange(0, 255)) #  transaction key
@@ -117,7 +116,6 @@ class Torrent(object):
     #     response = sock.recvfrom(2048)[0]
     #     print(response)
 
-
     @staticmethod
     def construct_peer_id():
         return '-PC0001-' + ''.join([str(random.randint(0, 9)) for _ in range(12)])
@@ -143,7 +141,7 @@ class Torrent(object):
         # translates each binary string into decimal ip:port and returns it
         return [(socket.inet_ntoa(p[:4]), unpack(">H", p[4:])[0]) for p in peers]
 
-    def _handshake(self, peers):
+    def _handshake(self):
         params = dict()
 
         # encodes and computes sha1 from info
