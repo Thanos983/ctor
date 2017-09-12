@@ -1,22 +1,52 @@
 import bencoder
 import random
 import hashlib
-import json
-import requests
 import socket
 from struct import unpack
-from urllib.parse import urlparse
-from pprint import pprint
 
 
 class Torrent(object):
     """ a helper class for keeping track of torrent's information"""
 
+    @staticmethod
+    def magnet_to_torrent(magnet):
+        """ Retrieves the necessary information from the magnet link"""
+        torrent_data = dict()
+        announce_list = list()
+        info = dict()
+        magnet = magnet[8::].split("&")
+        magnet = [element.split('=') for element in magnet]
+        # print(magnet)
+
+        for element in magnet:
+            if element[0] == 'xt':
+                info[b'hash_info'] = element[1][9::]
+            elif element[0] == 'dn':
+                info[b'name'] = element[1]
+            elif element[0] == 'tr':
+                if b'announce' not in torrent_data.keys():  # announce is empty
+                    torrent_data[b'announce'] = element[1]
+                else:  # Announce has a link already. Populate announce list
+                    announce_list.append(list(element[1]))
+
+        torrent_data[b'info'] = info
+        torrent_data[b'announce-list'] = announce_list
+        torrent_data[b'creation date'] = None
+
+        return torrent_data
+
     def __init__(self, file_name):
 
-        file = open(file_name, 'rb')
-        self.torrent_data = bencoder.decode(file.read())
-        print(self.torrent_data)
+        if file_name.endswith('torrent'):
+            file = open(file_name, 'rb')
+            self.torrent_data = bencoder.decode(file.read())
+            self.info = self.torrent_data[b'info']
+            self.hash_info = hashlib.sha1(bencoder.encode(self.info)).digest()
+        elif file_name.startswith('magnet'):
+            self.torrent_data = self.magnet_to_torrent(file_name)
+            self.hash_info = self.torrent_data[b'info'][b'hash_info']
+
+        # print(self.torrent_data)
 
         self.peerID = self.construct_peer_id()
         self.downloaded = 0
@@ -25,7 +55,7 @@ class Torrent(object):
         # TODO: proper handling of port. From 6881-6889 check every port if it is open and pick the first one
         self.port = 6882
         self.event = 'started'
-        self.info = self.torrent_data[b'info']
+
         self.creation_date = self.torrent_data[b'creation date']
         self.announce = self.torrent_data[b'announce']
 
@@ -46,7 +76,46 @@ class Torrent(object):
             self.files.append(file_data)
 
         self.total_length = self.get_total_length()
+        # self.get_udp_peers()
 
+
+    # def get_udp_peers(self):
+    #
+    #     key = int(random.randrange(0, 255)) #  transaction key
+    #     action = 0x0
+    #
+    #     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    #     hostname = urlparse(self.announce).hostname
+    #     port = urlparse(self.announce).port
+    #
+    #     sock.settimeout(8)
+    #     conn = (socket.gethostbyname(hostname), port)
+    #
+    #     req, transaction_id = self.udp_create_connection()
+    #     print(type(req), type(conn))
+    #     sock.sendto(req, conn)
+    #     buf = sock.recvfrom(2048)[0]
+    #     connection_id = self.udp_parse_connection_response(buf, transaction_id)
+    #     print(connection_id)
+    #
+    #     payload = struct.pack("!q", connection_id)  # first 8 bytes is connection id
+    #     payload += struct.pack("!i", action)
+    #     payload += struct.pack("!i", transaction_id)  # followed by 4 byte transaction id
+    #     payload += struct.pack('!20s', hashlib.sha1(bencoder.encode(self.info)).digest())
+    #     payload += struct.pack('!20s', self.peerID.encode())
+    #     payload += struct.pack('!q', int(self.downloaded))
+    #     payload += struct.pack('!q', int(self.total_length))
+    #     payload += struct.pack('!q', int(self.uploaded))
+    #     payload += struct.pack("!i", 0x2)  # event 2 denotes start of downloading
+    #     payload += struct.pack("!i", 0x0)
+    #     payload += struct.pack("!i", key)
+    #     payload += struct.pack("!i", -1)  # Number of peers required. Set to -1 for default
+    #     payload += struct.pack('!q', sock.getsockname()[1])  # port that got the answer
+    #
+    #     sock.sendto(payload, conn)
+    #
+    #     response = sock.recvfrom(2048)[0]
+    #     print(response)
 
 
     @staticmethod
@@ -60,40 +129,6 @@ class Torrent(object):
             length += file[b'length']
 
         return length
-
-    def get_peers(self):
-        params = dict()
-
-        # encodes and computes sha1 from info
-        params['info_hash'] = hashlib.sha1(bencoder.encode(self.info)).digest()
-        params['peerID'] = self.peerID
-        params['port'] = self.port
-        params['uploaded'] = self.uploaded
-        params['downloaded'] = self.downloaded
-        params['length'] = self.get_total_length()
-        params['compact'] = self.compact
-        params['event'] = self.event
-
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.0; WOW64; rv:24.0) Gecko/20100101 Firefox/24.0'}
-        # send get request to the tracker
-        MAX_RETRIES = 20
-        session = requests.session()
-        print(self.announce)
-        # adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
-        # session.mount('https://', adapter)
-        # session.mount('http://', adapter)
-
-        response = session.get('http://atrack.pow7.com/announce', params=params, verify=False, timeout=3)
-        print(response)
-        response_data = bencoder.decode(response.content)
-        try:
-            response_data[b'peers'] = self.bin_to_dec(response_data[b'peers'])
-        except KeyError:
-            print("torrent " + str(self.info[b'name']) + ' could not be downloaded')
-
-        # handshake_response = self._handshake(response_data[b'peers'])
-
-        return response_data
 
     @staticmethod
     def bin_to_dec(peers):
@@ -117,8 +152,3 @@ class Torrent(object):
         params['reserved'] = 8 * chr(0)
         params['peerID'] = self.peerID
         params['info_hash'] = hashlib.sha1(bencoder.encode(self.info)).digest()
-
-
-
-class PeerConnection(object):
-    pass
